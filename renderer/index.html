@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ETW PMC Profiler</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Admin Warning Banner -->
+  <div id="admin-banner" class="banner banner-warn" style="display: none;">
+    관리자 권한으로 실행되지 않았습니다. PMC 측정을 위해 관리자 권한이 필요합니다.
+  </div>
+
+  <div class="layout">
+
+    <!-- Left Pane: Process List -->
+    <div class="pane pane-left">
+      <div class="pane-header">
+        <h2>프로세스 목록</h2>
+        <div class="search-row">
+          <input type="text" id="proc-search" placeholder="이름 또는 PID 검색..." />
+          <button id="btn-refresh" title="새로고침">&#8635;</button>
+          <label class="auto-refresh-label">
+            <input type="checkbox" id="chk-auto-refresh" checked />
+            자동
+          </label>
+        </div>
+      </div>
+      <div class="proc-list-container">
+        <table id="proc-table">
+          <thead>
+            <tr>
+              <th>PID</th>
+              <th>이름</th>
+              <th>PPID</th>
+            </tr>
+          </thead>
+          <tbody id="proc-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Right Pane: Details -->
+    <div class="pane pane-right">
+
+      <!-- Selected Process Card -->
+      <div class="card" id="card-selected">
+        <h3>선택된 프로세스</h3>
+        <div id="selected-info" class="selected-info">
+          <span class="placeholder">프로세스를 선택하세요</span>
+        </div>
+      </div>
+
+      <!-- PMC Measurement Card -->
+      <div class="card" id="card-pmc">
+        <h3>PMC 하드웨어 카운터 측정</h3>
+        <div class="measure-controls">
+          <label>측정 시간:
+            <select id="sel-duration">
+              <option value="3">3초</option>
+              <option value="5" selected>5초</option>
+              <option value="10">10초</option>
+              <option value="20">20초</option>
+              <option value="30">30초</option>
+            </select>
+          </label>
+          <button id="btn-measure" disabled>측정 시작</button>
+        </div>
+
+        <!-- Raw Counters Table -->
+        <div id="raw-results" style="display: none;">
+          <h4>Raw 카운터</h4>
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>카운터</th>
+                <th>값</th>
+              </tr>
+            </thead>
+            <tbody id="raw-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Derived Metrics -->
+        <div id="derived-results" style="display: none;">
+          <h4>분석 지표</h4>
+          <div class="metrics-grid" id="metrics-grid"></div>
+        </div>
+
+        <!-- Measurement Info -->
+        <div id="measure-info" style="display: none;">
+          <p id="measure-meta"></p>
+        </div>
+      </div>
+
+      <!-- System Info Card -->
+      <div class="card" id="card-system">
+        <h3>시스템 정보</h3>
+        <div id="system-info">
+          <span class="placeholder">로딩 중...</span>
+        </div>
+      </div>
+
+      <!-- Status Log Card -->
+      <div class="card" id="card-log">
+        <h3>상태 로그</h3>
+        <div class="log-container" id="log-container"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
