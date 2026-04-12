@@ -9,12 +9,15 @@ contextBridge.exposeInMainWorld('api', {
   stopTracking: () => ipcRenderer.invoke('stop-tracking'),
   getTrackingState: () => ipcRenderer.invoke('get-tracking-state'),
 
-  // PMC measurement
+  // PMC measurement — opts: { mode, pid? }
   pmcAvailability: () => ipcRenderer.invoke('pmc-availability'),
-  pmcMeasure: (pid, durationSec) => ipcRenderer.invoke('pmc-measure', pid, durationSec),
+  pmcMeasure: (opts, durationSec) => ipcRenderer.invoke('pmc-measure', opts, durationSec),
   onPmcProgress: (callback) => {
     ipcRenderer.on('pmc-progress', (_event, msg) => callback(msg));
   },
+
+  // Process tree
+  getProcessTree: (pid) => ipcRenderer.invoke('get-process-tree', pid),
 
   // System info
   getSystemInfo: () => ipcRenderer.invoke('get-system-info'),

@@ -199,6 +199,18 @@ body:has(.banner:not([style*="display: none"])) .layout {
   color: #e6e6e6;
   font-size: 12px;
 }
+/* --- Mode Info --- */
+.mode-info {
+  font-size: 11px;
+  color: #888;
+  margin-top: 6px;
+  min-height: 16px;
+}
+.mode-info .tree-pids {
+  color: #9cdcfe;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+}
+
 #btn-measure {
   padding: 6px 16px;
   background: #0e639c;
@@ -242,41 +254,25 @@ body:has(.banner:not([style*="display: none"])) .layout {
 .result-table td.val {
   text-align: right;
   color: #b5cea8;
+  white-space: nowrap;
 }
-
-/* --- Metrics Grid --- */
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 8px;
-}
-.metric-card {
-  background: #2d2d2d;
-  border: 1px solid #3c3c3c;
-  border-radius: 4px;
-  padding: 10px 12px;
-}
-.metric-card .metric-label {
-  font-size: 11px;
-  color: #888;
-  margin-bottom: 4px;
-}
-.metric-card .metric-value {
-  font-size: 20px;
-  font-weight: 700;
-  font-family: 'Cascadia Code', 'Consolas', monospace;
-}
-.metric-card .metric-unit {
-  font-size: 11px;
+.result-table td.formula {
   color: #666;
-  margin-left: 4px;
+  font-size: 11px;
+  font-style: italic;
 }
 
-/* Metric color coding */
-.metric-card.good .metric-value { color: #89d185; }
-.metric-card.warn .metric-value { color: #dcdcaa; }
-.metric-card.bad  .metric-value { color: #f48771; }
-.metric-card.neutral .metric-value { color: #9cdcfe; }
+/* --- Estimate Badge --- */
+.estimate-badge {
+  font-size: 9px;
+  background: #4a3800;
+  color: #dcdcaa;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 4px;
+  font-weight: 400;
+  vertical-align: middle;
+}
 
 /* --- System Info --- */
 #system-info {

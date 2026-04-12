@@ -16,12 +16,14 @@ const btnRefresh    = document.getElementById('btn-refresh');
 const chkAutoRefresh = document.getElementById('chk-auto-refresh');
 const procTbody     = document.getElementById('proc-tbody');
 const selectedInfo  = document.getElementById('selected-info');
+const selMode       = document.getElementById('sel-mode');
 const selDuration   = document.getElementById('sel-duration');
 const btnMeasure    = document.getElementById('btn-measure');
+const modeInfoDiv   = document.getElementById('mode-info');
 const rawResults    = document.getElementById('raw-results');
 const rawTbody      = document.getElementById('raw-tbody');
 const derivedResults = document.getElementById('derived-results');
-const metricsGrid   = document.getElementById('metrics-grid');
+const derivedTbody  = document.getElementById('derived-tbody');
 const measureInfo   = document.getElementById('measure-info');
 const measureMeta   = document.getElementById('measure-meta');
 const systemInfoDiv = document.getElementById('system-info');
@@ -63,6 +65,8 @@ const logContainer  = document.getElementById('log-container');
   btnRefresh.addEventListener('click', refreshProcessList);
   chkAutoRefresh.addEventListener('change', setupAutoRefresh);
   btnMeasure.addEventListener('click', startMeasurement);
+  selMode.addEventListener('change', onModeChange);
+  onModeChange(); // init mode state
 
   // PMC progress events
   window.api.onPmcProgress((msg) => {
@@ -118,9 +122,46 @@ function selectProcess(proc) {
     <span class="name-label">${escHtml(proc.name)}</span>
     <span style="color:#666"> (PPID: ${proc.ppid})</span>
   `;
-  btnMeasure.disabled = false;
-  filterProcessList(); // re-render to highlight
+  updateMeasureButton();
+  filterProcessList();
   log(`프로세스 선택: ${proc.name} (PID ${proc.pid})`, 'info');
+
+  // If app mode, show process tree preview
+  if (selMode.value === 'app') {
+    showProcessTreePreview(proc.pid);
+  }
+}
+
+function onModeChange() {
+  const mode = selMode.value;
+  updateMeasureButton();
+
+  if (mode === 'system') {
+    modeInfoDiv.textContent = '시스템 전체 CPU 활동을 측정합니다. 프로세스 선택 불필요.';
+  } else if (mode === 'app') {
+    modeInfoDiv.textContent = '선택한 프로세스 + 모든 자식 프로세스를 함께 측정합니다.';
+    if (selectedProcess) showProcessTreePreview(selectedProcess.pid);
+  } else {
+    modeInfoDiv.textContent = '';
+  }
+}
+
+function updateMeasureButton() {
+  const mode = selMode.value;
+  if (mode === 'system') {
+    btnMeasure.disabled = false;
+  } else {
+    btnMeasure.disabled = !selectedProcess;
+  }
+}
+
+async function showProcessTreePreview(pid) {
+  const res = await window.api.getProcessTree(pid);
+  if (res.ok && res.data.length > 1) {
+    modeInfoDiv.innerHTML = `프로세스 트리: <span class="tree-pids">${res.data.length}개 PID (${res.data.slice(0, 8).join(', ')}${res.data.length > 8 ? '...' : ''})</span>`;
+  } else {
+    modeInfoDiv.textContent = '자식 프로세스 없음 — 단일 PID로 측정됩니다.';
+  }
 }
 
 function setupAutoRefresh() {
@@ -138,23 +179,31 @@ function setupAutoRefresh() {
 /* ------------------------------------------------------------------ */
 
 async function startMeasurement() {
-  if (!selectedProcess || isMeasuring) return;
+  const mode = selMode.value;
+
+  if (mode !== 'system' && !selectedProcess) return;
+  if (isMeasuring) return;
 
   isMeasuring = true;
   btnMeasure.textContent = '측정 중...';
   btnMeasure.classList.add('measuring');
   btnMeasure.disabled = true;
 
-  // Clear previous results
   rawResults.style.display = 'none';
   derivedResults.style.display = 'none';
   measureInfo.style.display = 'none';
 
   const duration = parseInt(selDuration.value, 10);
-  log(`측정 시작: PID ${selectedProcess.pid}, ${duration}초`, 'info');
+  const opts = { mode };
+  if (mode === 'pid' || mode === 'app') {
+    opts.pid = selectedProcess.pid;
+  }
+
+  const modeLabels = { pid: `PID ${opts.pid}`, app: `앱 PID ${opts.pid}+자식`, system: '시스템 전체' };
+  log(`측정 시작: ${modeLabels[mode]}, ${duration}초`, 'info');
 
   try {
-    const res = await window.api.pmcMeasure(selectedProcess.pid, duration);
+    const res = await window.api.pmcMeasure(opts, duration);
 
     if (!res.ok) {
       log(`측정 실패: ${res.error}`, 'error');
@@ -162,7 +211,7 @@ async function startMeasurement() {
     }
 
     const data = res.data;
-    log(`측정 완료: ${data.sampleCount} 샘플 (시스템 전체: ${data.totalSystemSamples})`, 'info');
+    log(`측정 완료 [${data.modeLabel}]: ${data.sampleCount} 샘플 (시스템: ${data.totalSystemSamples})`, 'info');
 
     renderRawCounters(data.raw);
     renderDerivedMetrics(data.derived);
@@ -174,7 +223,7 @@ async function startMeasurement() {
     isMeasuring = false;
     btnMeasure.textContent = '측정 시작';
     btnMeasure.classList.remove('measuring');
-    btnMeasure.disabled = false;
+    updateMeasureButton();
   }
 }
 
@@ -188,6 +237,9 @@ const COUNTER_LABELS = {
   LLCMisses: 'LLC Misses',
   BranchMispredictions: 'Branch Mispredictions',
   BranchInstructions: 'Branch Instructions',
+  LLCReference: 'LLC References',
+  TotalIssues: 'uOps Dispatched',
+  UnhaltedReferenceCycles: 'Reference Cycles',
 };
 
 function renderRawCounters(counters) {
@@ -204,59 +256,54 @@ function renderRawCounters(counters) {
 }
 
 function renderDerivedMetrics(d) {
-  metricsGrid.innerHTML = '';
+  derivedTbody.innerHTML = '';
 
-  const metrics = [
-    {
-      label: 'IPC (Instructions Per Cycle)',
-      value: d.ipc.toFixed(3),
-      unit: '',
-      rating: d.ipc >= 2.0 ? 'good' : d.ipc >= 1.0 ? 'warn' : 'bad',
-    },
-    {
-      label: 'LLC MPKI (Misses Per 1K Instr)',
-      value: d.llcMpki.toFixed(3),
-      unit: '',
-      rating: d.llcMpki <= 1.0 ? 'good' : d.llcMpki <= 5.0 ? 'warn' : 'bad',
-    },
-    {
-      label: 'DRAM Bandwidth (추정)',
-      value: d.dramMB >= 1 ? d.dramMB.toFixed(1) : (d.dramBytes / 1024).toFixed(1),
-      unit: d.dramMB >= 1 ? 'MB' : 'KB',
-      rating: 'neutral',
-    },
-    {
-      label: 'Branch Misprediction Rate',
-      value: d.branchMispredRate.toFixed(2),
-      unit: '%',
-      rating: d.branchMispredRate <= 1.0 ? 'good' : d.branchMispredRate <= 5.0 ? 'warn' : 'bad',
-    },
+  const dramVal = d.dramGiB >= 1
+    ? `${d.dramGiB.toFixed(2)} GiB (${formatNum(d.dramBytes)} B)`
+    : `${d.dramMB.toFixed(1)} MB (${formatNum(d.dramBytes)} B)`;
+
+  const freqVal = d.effectiveFreqGHz > 0
+    ? `${d.effectiveFreqGHz.toFixed(2)} GHz`
+    : d.freqRatio.toFixed(3);
+
+  const rows = [
+    { label: 'IPC',                 value: d.ipc.toFixed(3),                      formula: 'instr / cycles' },
+    { label: 'L3 MPKI',             value: d.l3Mpki.toFixed(2),                   formula: 'LLC miss / instr x 1000',       estimate: true },
+    { label: 'Branch MPKI',         value: d.branchMpki.toFixed(2),               formula: 'br mispredict / instr x 1000',  estimate: true },
+    { label: 'Branch Mispred Rate', value: d.branchMispredRate.toFixed(2) + ' %', formula: 'br mispredict / br instr x 100', estimate: true },
+    { label: 'LLC Hit Rate',        value: d.llcHitRate.toFixed(2) + ' %',        formula: '(ref - miss) / ref x 100',      estimate: true },
+    { label: 'LLC Ref MPKI',        value: d.llcRefMpki.toFixed(2),               formula: 'LLC ref / instr x 1000',        estimate: true },
+    { label: 'uOps / Instruction',  value: d.uopsPerInst.toFixed(2),             formula: 'TotalIssues / InstrRetired',     estimate: true },
+    { label: 'Effective Frequency', value: freqVal,                               formula: 'core cyc / ref cyc x base',     estimate: true },
+    { label: 'DRAM accesses',       value: formatNum(d.dramAccesses),             formula: 'LLC miss (P+E)',                estimate: true },
+    { label: 'DRAM bytes',          value: dramVal,                               formula: 'LLC miss x 64B',                estimate: true },
   ];
 
-  for (const m of metrics) {
-    const div = document.createElement('div');
-    div.className = `metric-card ${m.rating}`;
-    div.innerHTML = `
-      <div class="metric-label">${m.label}</div>
-      <div>
-        <span class="metric-value">${m.value}</span>
-        <span class="metric-unit">${m.unit}</span>
-      </div>
-    `;
-    metricsGrid.appendChild(div);
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    const badge = row.estimate ? ' <span class="estimate-badge">추정</span>' : '';
+    tr.innerHTML = `<td>${row.label}${badge}</td><td class="val">${row.value}</td><td class="formula">${row.formula}</td>`;
+    derivedTbody.appendChild(tr);
   }
 
   derivedResults.style.display = 'block';
 }
 
 function renderMeasureMeta(data) {
-  measureMeta.textContent = [
+  const parts = [
+    `모드: ${data.modeLabel || data.mode}`,
     `수집 시간: ${data.durationSec}초`,
-    `PID 샘플: ${data.sampleCount}`,
-    `시스템 전체 샘플: ${data.totalSystemSamples}`,
-    `샘플링 간격: ${data.samplingInterval}`,
-    `수집 시각: ${data.collectedAt}`,
-  ].join(' | ');
+    `대상 샘플: ${data.sampleCount}`,
+    `시스템 샘플: ${data.totalSystemSamples}`,
+  ];
+  if (data.pids && data.pids.length > 1) {
+    parts.push(`PID: ${data.pids.length}개`);
+  }
+  if (data.elapsedSec) {
+    parts.push(`소요 시간: ${data.elapsedSec}s`);
+  }
+  parts.push(`수집 시각: ${data.collectedAt}`);
+  measureMeta.textContent = parts.join(' | ');
   measureInfo.style.display = 'block';
 }
 
