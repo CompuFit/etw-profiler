@@ -1,0 +1,13 @@
+node_modules/
+package-lock.json
+
+# ETW temp files
+*.etl
+*.etl.ngenpdb
+
+# Test output
+scripts/*-output.txt
+
+# OS
+Thumbs.db
+Desktop.ini

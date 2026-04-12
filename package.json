@@ -1,0 +1,16 @@
+{
+  "name": "etw-profiler",
+  "version": "0.1.0",
+  "description": "Windows ETW PMC 하드웨어 카운터 프로파일러 (무설치)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test-parser": "node scripts/test-etw-parser.js"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  },
+  "dependencies": {
+    "ps-list": "7.2.0"
+  }
+}
