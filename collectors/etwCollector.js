@@ -7,11 +7,16 @@ const os = require('os');
 const { parseEtlDetailed, extractTidPidMap } = require('./etlParser');
 
 const COUNTER_NAMES = [
+  // MVP (5)
   'InstructionRetired',
   'TotalCycles',
   'LLCMisses',
   'BranchMispredictions',
   'BranchInstructions',
+  // v1.1 (3) — ETW에서 추가로 사용 가능한 카운터
+  'LLCReference',            // LLC 접근 횟수 → Hit Rate 유도
+  'TotalIssues',             // uops dispatched (uops retired 근사치)
+  'UnhaltedReferenceCycles', // 기준 사이클 → 실효 주파수 추정
 ];
 
 const SAMPLING_INTERVAL = 65536;
@@ -38,25 +43,60 @@ async function checkAvailability() {
 
 /**
  * Collect all 5 PMC counters via multi-pass approach.
- * Each pass configures one counter as the profiling source.
- * Per-PID sample count × SAMPLING_INTERVAL = counter estimate.
  *
- * Note: Background system profiling adds noise. IPC ratio is reliable;
- * absolute counter values and cross-counter metrics (MPKI, branch rate)
- * are sampled estimates.
+ * @param {object} opts
+ * @param {string} opts.mode  'pid' | 'system' | 'app'
+ * @param {number} [opts.pid] Target PID (required for 'pid' and 'app' modes)
+ * @param {number[]} [opts.pids] All PIDs to include (for 'app' mode, auto-resolved if omitted)
+ * @param {number} durationSec
+ * @param {function} onProgress
  */
-async function collect(pid, durationSec, onProgress = () => {}) {
+async function collect(opts, durationSec, onProgress = () => {}) {
+  const mode = opts.mode || 'pid';
   const perPassSec = Math.max(2, Math.ceil(durationSec / COUNTER_NAMES.length));
   const tempDir = path.join(os.tmpdir(), `etw-pmc-${Date.now()}`);
   fs.mkdirSync(tempDir, { recursive: true });
+  const startTime = Date.now();
 
   try {
-    onProgress('대상 프로세스 스레드 ID 수집 중...');
-    const preTids = getThreadIds(pid);
-    onProgress(`PID ${pid}: ${preTids.size}개 스레드`);
+    // Build target TID set based on mode
+    let targetTids = null; // null = system-wide
+    let targetPids = [];
+    let modeLabel = '';
 
-    if (preTids.size === 0) {
-      throw new Error(`PID ${pid}의 스레드를 찾을 수 없습니다.`);
+    if (mode === 'system') {
+      modeLabel = '시스템 전체';
+      onProgress('시스템 전체 측정 모드');
+      // targetTids stays null → parseEtlDetailed counts all samples
+
+    } else if (mode === 'app') {
+      const rootPid = opts.pid;
+      targetPids = opts.pids || getProcessTree(rootPid);
+      modeLabel = `앱 (${targetPids.length}개 프로세스)`;
+      onProgress(`앱 측정: PID ${rootPid} + 자식 프로세스 ${targetPids.length}개`);
+
+      targetTids = new Set();
+      for (const p of targetPids) {
+        for (const t of getThreadIds(p)) targetTids.add(t);
+      }
+      onProgress(`총 ${targetTids.size}개 스레드`);
+
+      if (targetTids.size === 0) {
+        throw new Error('대상 프로세스 트리의 스레드를 찾을 수 없습니다.');
+      }
+
+    } else {
+      // mode === 'pid'
+      const pid = opts.pid;
+      targetPids = [pid];
+      modeLabel = `PID ${pid}`;
+      onProgress('대상 프로세스 스레드 ID 수집 중...');
+      targetTids = getThreadIds(pid);
+      onProgress(`PID ${pid}: ${targetTids.size}개 스레드`);
+
+      if (targetTids.size === 0) {
+        throw new Error(`PID ${pid}의 스레드를 찾을 수 없습니다.`);
+      }
     }
 
     const counters = {};
@@ -82,20 +122,25 @@ async function collect(pid, durationSec, onProgress = () => {}) {
       await runCmd(WPR_EXE, ['-stop', etlPath, '-skipPdbGen'], 120000);
 
       if (!fs.existsSync(etlPath)) {
-        onProgress(`  ⚠ ${name}: ETL 미생성`);
+        onProgress(`  ${name}: ETL 미생성`);
         continue;
       }
 
-      // Build TID set from ETL + live
-      const { tidToPid } = extractTidPidMap(etlPath);
-      const allTids = new Set(preTids);
-      for (const [tid, p] of tidToPid) {
-        if (p === pid) allTids.add(tid);
+      // For pid/app modes: refresh TIDs from ETL + live processes
+      let parseTids = targetTids;
+      if (mode !== 'system' && targetTids) {
+        const { tidToPid } = extractTidPidMap(etlPath);
+        parseTids = new Set(targetTids);
+        for (const [tid, p] of tidToPid) {
+          if (targetPids.includes(p)) parseTids.add(tid);
+        }
+        // Refresh live TIDs
+        for (const p of targetPids) {
+          for (const t of getThreadIds(p)) parseTids.add(t);
+        }
       }
-      const liveTids = getThreadIds(pid);
-      for (const t of liveTids) allTids.add(t);
 
-      const result = parseEtlDetailed(etlPath, allTids);
+      const result = parseEtlDetailed(etlPath, parseTids);
 
       counters[name] = result.pidSamples * SAMPLING_INTERVAL;
       totalPidSamples += result.pidSamples;
@@ -106,10 +151,14 @@ async function collect(pid, durationSec, onProgress = () => {}) {
       try { fs.unlinkSync(etlPath); } catch (_) {}
     }
 
-    onProgress('수집 완료!');
+    const elapsedSec = round((Date.now() - startTime) / 1000, 2);
+    onProgress(`수집 완료! (${elapsedSec}초 소요)`);
 
     return {
-      pid,
+      mode,
+      modeLabel,
+      pid: opts.pid || null,
+      pids: targetPids,
       sampleCount: totalPidSamples,
       totalSystemSamples,
       counters,
@@ -117,9 +166,30 @@ async function collect(pid, durationSec, onProgress = () => {}) {
       counterNames: COUNTER_NAMES,
       pmcValuesAvailable: true,
       perPassDuration: perPassSec,
+      elapsedSec,
     };
   } finally {
     try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
+/**
+ * Get all PIDs in a process tree (the root PID + all descendants).
+ */
+function getProcessTree(rootPid) {
+  try {
+    const out = execSync(
+      `powershell -NoProfile -Command "function Get-Tree($id){$id;Get-CimInstance Win32_Process|Where-Object{$_.ParentProcessId -eq $id}|ForEach-Object{Get-Tree $_.ProcessId}};Get-Tree ${rootPid}"`,
+      { timeout: 10000, windowsHide: true }
+    ).toString().trim();
+    const pids = [];
+    for (const line of out.split(/\r?\n/)) {
+      const pid = parseInt(line.trim(), 10);
+      if (!isNaN(pid) && pid > 0) pids.push(pid);
+    }
+    return pids.length > 0 ? pids : [rootPid];
+  } catch (_) {
+    return [rootPid];
   }
 }
 
@@ -200,5 +270,10 @@ function translateError(msg, code) {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function round(val, decimals) {
+  const f = Math.pow(10, decimals);
+  return Math.round(val * f) / f;
+}
 
 module.exports = { checkAvailability, collect, COUNTER_NAMES, SAMPLING_INTERVAL };

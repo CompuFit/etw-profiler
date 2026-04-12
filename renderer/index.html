@@ -57,6 +57,13 @@
       <div class="card" id="card-pmc">
         <h3>PMC 하드웨어 카운터 측정</h3>
         <div class="measure-controls">
+          <label>측정 모드:
+            <select id="sel-mode">
+              <option value="pid" selected>단일 PID</option>
+              <option value="app">앱 (프로세스 트리)</option>
+              <option value="system">시스템 전체</option>
+            </select>
+          </label>
           <label>측정 시간:
             <select id="sel-duration">
               <option value="3">3초</option>
@@ -68,6 +75,7 @@
           </label>
           <button id="btn-measure" disabled>측정 시작</button>
         </div>
+        <div id="mode-info" class="mode-info"></div>
 
         <!-- Raw Counters Table -->
         <div id="raw-results" style="display: none;">
@@ -83,10 +91,19 @@
           </table>
         </div>
 
-        <!-- Derived Metrics -->
+        <!-- Derived Metrics Table -->
         <div id="derived-results" style="display: none;">
           <h4>분석 지표</h4>
-          <div class="metrics-grid" id="metrics-grid"></div>
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>지표</th>
+                <th>값</th>
+                <th>산식</th>
+              </tr>
+            </thead>
+            <tbody id="derived-tbody"></tbody>
+          </table>
         </div>
 
         <!-- Measurement Info -->

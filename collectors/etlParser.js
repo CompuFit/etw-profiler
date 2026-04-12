@@ -18,14 +18,17 @@ const OPCODE_SAMPLED_PROFILE = 0x2E;
 
 /**
  * Parse ETL and return per-source sample counts for both system-wide and target PID.
+ * @param {string} etlPath
+ * @param {Set<number>|null} targetTids - TIDs to filter, or null for system-wide (count all)
  */
 function parseEtlDetailed(etlPath, targetTids) {
+  const isSystemWide = !targetTids;
   const buf = fs.readFileSync(etlPath);
 
   let totalSamples = 0;
   let pidSamples = 0;
-  const systemSourceDist = new Map();  // Source → count (all PIDs)
-  const pidSourceDist = new Map();     // Source → count (target PID only)
+  const systemSourceDist = new Map();
+  const pidSourceDist = new Map();
 
   let offset = 0;
   while (offset + BUF_HEADER_SIZE < buf.length) {
@@ -67,7 +70,7 @@ function parseEtlDetailed(etlPath, targetTids) {
           totalSamples++;
           systemSourceDist.set(source, (systemSourceDist.get(source) || 0) + 1);
 
-          if (targetTids.has(threadId)) {
+          if (isSystemWide || targetTids.has(threadId)) {
             pidSamples++;
             pidSourceDist.set(source, (pidSourceDist.get(source) || 0) + 1);
           }

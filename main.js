@@ -84,11 +84,10 @@ ipcMain.handle('pmc-availability', async () => {
   }
 });
 
-// PMC measurement
-ipcMain.handle('pmc-measure', async (event, pid, durationSec) => {
+// PMC measurement — opts: { mode: 'pid'|'system'|'app', pid? }
+ipcMain.handle('pmc-measure', async (event, opts, durationSec) => {
   try {
-    const result = await pmcService.startCollection(pid, durationSec, (msg) => {
-      // Send progress to renderer
+    const result = await pmcService.startCollection(opts, durationSec, (msg) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('pmc-progress', msg);
       }
@@ -96,6 +95,25 @@ ipcMain.handle('pmc-measure', async (event, pid, durationSec) => {
     return { ok: true, data: result };
   } catch (e) {
     return { ok: false, error: e.message };
+  }
+});
+
+// Get process tree (parent + all children)
+ipcMain.handle('get-process-tree', async (_event, pid) => {
+  try {
+    const { execSync } = require('child_process');
+    const out = execSync(
+      `powershell -NoProfile -Command "function Get-Tree($id){$id;Get-CimInstance Win32_Process|Where-Object{$_.ParentProcessId -eq $id}|ForEach-Object{Get-Tree $_.ProcessId}};Get-Tree ${pid}"`,
+      { timeout: 10000, windowsHide: true }
+    ).toString().trim();
+    const pids = [];
+    for (const line of out.split(/\r?\n/)) {
+      const p = parseInt(line.trim(), 10);
+      if (!isNaN(p) && p > 0) pids.push(p);
+    }
+    return { ok: true, data: pids.length > 0 ? pids : [pid] };
+  } catch (e) {
+    return { ok: true, data: [pid] };
   }
 });
 
