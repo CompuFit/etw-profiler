@@ -7,8 +7,8 @@
  * Usage: node scripts/test-etw-collection.js [pid] [duration]
  */
 
-const pmcService = require('../pmcService');
-const systemInfo = require('../systemInfo');
+const pmcService = require('../src/services/pmcService');
+const systemInfo = require('../src/services/systemInfo');
 
 const targetPid = parseInt(process.argv[2], 10) || process.pid;
 const duration = parseInt(process.argv[3], 10) || 5;

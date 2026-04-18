@@ -26,6 +26,10 @@ const derivedResults = document.getElementById('derived-results');
 const derivedTbody  = document.getElementById('derived-tbody');
 const measureInfo   = document.getElementById('measure-info');
 const measureMeta   = document.getElementById('measure-meta');
+const btnRefreshUsage = document.getElementById('btn-refresh-usage');
+const gpuResults    = document.getElementById('gpu-results');
+const gpuTbody      = document.getElementById('gpu-tbody');
+const gpuAdaptersInfo = document.getElementById('gpu-adapters-info');
 const systemInfoDiv = document.getElementById('system-info');
 const logContainer  = document.getElementById('log-container');
 
@@ -66,7 +70,11 @@ const logContainer  = document.getElementById('log-container');
   chkAutoRefresh.addEventListener('change', setupAutoRefresh);
   btnMeasure.addEventListener('click', startMeasurement);
   selMode.addEventListener('change', onModeChange);
+  btnRefreshUsage.addEventListener('click', refreshUsage);
   onModeChange(); // init mode state
+
+  // Initial usage
+  refreshUsage();
 
   // PMC progress events
   window.api.onPmcProgress((msg) => {
@@ -191,6 +199,7 @@ async function startMeasurement() {
 
   rawResults.style.display = 'none';
   derivedResults.style.display = 'none';
+  gpuResults.style.display = 'none';
   measureInfo.style.display = 'none';
 
   const duration = parseInt(selDuration.value, 10);
@@ -215,6 +224,7 @@ async function startMeasurement() {
 
     renderRawCounters(data.raw);
     renderDerivedMetrics(data.derived);
+    if (data.gpu) renderGpuMetrics(data.gpu, opts.pid || null);
     renderMeasureMeta(data);
 
   } catch (e) {
@@ -305,6 +315,107 @@ function renderMeasureMeta(data) {
   parts.push(`수집 시각: ${data.collectedAt}`);
   measureMeta.textContent = parts.join(' | ');
   measureInfo.style.display = 'block';
+}
+
+/* ------------------------------------------------------------------ */
+/*  System Usage (Task Manager style)                                  */
+/* ------------------------------------------------------------------ */
+
+async function refreshUsage() {
+  btnRefreshUsage.disabled = true;
+  btnRefreshUsage.textContent = '측정 중...';
+
+  try {
+    const res = await window.api.getUsage();
+    if (!res.ok) return;
+    const d = res.data;
+
+    // CPU
+    setBar('cpu', d.cpu.percent, `${d.cpu.percent}%`);
+
+    // RAM
+    setBar('ram', d.ram.percent, `${d.ram.usedGB} / ${d.ram.totalGB} GB (${d.ram.percent}%)`);
+
+    // GPU (3D engine)
+    const gpu3d = d.gpu.utilization.total3d;
+    setBar('gpu', gpu3d, `${gpu3d}%`);
+
+    // VRAM
+    const vramUsed = d.gpu.memory.dedicatedBytes + d.gpu.memory.sharedBytes;
+    const vramTotal = d.totalVramBytes > 0 ? d.totalVramBytes : vramUsed;
+    const vramPercent = vramTotal > 0 ? Math.min(100, (vramUsed / vramTotal) * 100) : 0;
+    setBar('vram', vramPercent, `${fmtBytes(vramUsed)} / ${fmtBytes(vramTotal)} (${vramPercent.toFixed(0)}%)`);
+
+    // Detail text
+    const detail = document.getElementById('usage-detail');
+    const parts = [
+      `CPU ${d.cpu.logicalCores} cores`,
+    ];
+    if (d.gpu.utilization.totalVideo > 0) parts.push(`Video ${d.gpu.utilization.totalVideo}%`);
+    if (d.gpu.utilization.totalCopy > 0) parts.push(`Copy ${d.gpu.utilization.totalCopy}%`);
+    detail.textContent = parts.join(' | ');
+
+  } catch (_) {}
+  finally {
+    btnRefreshUsage.disabled = false;
+    btnRefreshUsage.textContent = '새로고침';
+  }
+}
+
+function setBar(id, percent, text) {
+  const fill = document.getElementById(`bar-${id}`);
+  const val = document.getElementById(`val-${id}`);
+  fill.style.width = `${Math.min(100, percent)}%`;
+  fill.className = 'usage-fill' + (percent >= 90 ? ' high' : percent >= 70 ? ' mid' : '');
+  val.textContent = text;
+}
+
+/* ------------------------------------------------------------------ */
+/*  GPU Raw 카운터 (CPU와 통합 측정)                                    */
+/* ------------------------------------------------------------------ */
+
+function renderGpuMetrics(gpu, targetPid) {
+  gpuTbody.innerHTML = '';
+
+  const rows = [
+    { label: '3D Engine Utilization',  value: gpu.utilization.total3d + ' %' },
+    { label: 'Copy Engine Utilization', value: gpu.utilization.totalCopy + ' %' },
+    { label: 'Video Engine Utilization', value: gpu.utilization.totalVideo + ' %' },
+    { label: 'VRAM Dedicated',          value: fmtBytes(gpu.memory.dedicatedBytes) },
+    { label: 'VRAM Shared',             value: fmtBytes(gpu.memory.sharedBytes) },
+  ];
+
+  // 프로세스별 VRAM (상위 5개)
+  if (gpu.perProcess && gpu.perProcess.length > 0) {
+    for (const p of gpu.perProcess.slice(0, 5)) {
+      rows.push({
+        label: `PID ${p.pid} VRAM`,
+        value: `Dedicated ${fmtBytes(p.dedicated)} / Shared ${fmtBytes(p.shared)}`,
+      });
+    }
+  }
+
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${row.label}</td><td class="val">${row.value}</td>`;
+    gpuTbody.appendChild(tr);
+  }
+
+  // 어댑터 정보
+  if (gpu.adapters && gpu.adapters.length > 0) {
+    gpuAdaptersInfo.textContent = gpu.adapters
+      .map(a => `${a.name} (${a.vramMB > 0 ? a.vramMB + ' MB' : 'Shared'}, driver ${a.driver})`)
+      .join(' / ');
+  }
+
+  gpuResults.style.display = 'block';
+}
+
+function fmtBytes(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GiB';
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return bytes + ' B';
 }
 
 /* ------------------------------------------------------------------ */

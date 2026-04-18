@@ -45,6 +45,35 @@
     <!-- Right Pane: Details -->
     <div class="pane pane-right">
 
+      <!-- System Usage Card (Task Manager style) -->
+      <div class="card" id="card-usage">
+        <h3>시스템 현황</h3>
+        <div class="usage-bar-row">
+          <div class="usage-item">
+            <div class="usage-label">CPU</div>
+            <div class="usage-bar"><div class="usage-fill" id="bar-cpu"></div></div>
+            <div class="usage-value" id="val-cpu">--</div>
+          </div>
+          <div class="usage-item">
+            <div class="usage-label">RAM</div>
+            <div class="usage-bar"><div class="usage-fill" id="bar-ram"></div></div>
+            <div class="usage-value" id="val-ram">--</div>
+          </div>
+          <div class="usage-item">
+            <div class="usage-label">GPU</div>
+            <div class="usage-bar"><div class="usage-fill" id="bar-gpu"></div></div>
+            <div class="usage-value" id="val-gpu">--</div>
+          </div>
+          <div class="usage-item">
+            <div class="usage-label">VRAM</div>
+            <div class="usage-bar"><div class="usage-fill" id="bar-vram"></div></div>
+            <div class="usage-value" id="val-vram">--</div>
+          </div>
+        </div>
+        <div class="usage-detail" id="usage-detail"></div>
+        <button id="btn-refresh-usage" class="btn-small">새로고침</button>
+      </div>
+
       <!-- Selected Process Card -->
       <div class="card" id="card-selected">
         <h3>선택된 프로세스</h3>
@@ -53,9 +82,9 @@
         </div>
       </div>
 
-      <!-- PMC Measurement Card -->
+      <!-- 측정 카드 (CPU + GPU 통합) -->
       <div class="card" id="card-pmc">
-        <h3>PMC 하드웨어 카운터 측정</h3>
+        <h3>성능 측정 (CPU + GPU)</h3>
         <div class="measure-controls">
           <label>측정 모드:
             <select id="sel-mode">
@@ -77,9 +106,9 @@
         </div>
         <div id="mode-info" class="mode-info"></div>
 
-        <!-- Raw Counters Table -->
+        <!-- CPU Raw 카운터 -->
         <div id="raw-results" style="display: none;">
-          <h4>Raw 카운터</h4>
+          <h4>CPU Raw 카운터</h4>
           <table class="result-table">
             <thead>
               <tr>
@@ -91,9 +120,9 @@
           </table>
         </div>
 
-        <!-- Derived Metrics Table -->
+        <!-- CPU 유도 지표 -->
         <div id="derived-results" style="display: none;">
-          <h4>분석 지표</h4>
+          <h4>CPU 유도 지표</h4>
           <table class="result-table">
             <thead>
               <tr>
@@ -104,6 +133,21 @@
             </thead>
             <tbody id="derived-tbody"></tbody>
           </table>
+        </div>
+
+        <!-- GPU Raw 카운터 -->
+        <div id="gpu-results" style="display: none;">
+          <h4>GPU Raw 카운터</h4>
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>카운터</th>
+                <th>값</th>
+              </tr>
+            </thead>
+            <tbody id="gpu-tbody"></tbody>
+          </table>
+          <div id="gpu-adapters-info" class="gpu-adapters-info"></div>
         </div>
 
         <!-- Measurement Info -->

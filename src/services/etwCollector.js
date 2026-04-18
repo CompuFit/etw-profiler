@@ -1,31 +1,38 @@
 'use strict';
 
+/**
+ * ETW PMC 수집기
+ *
+ * Windows 빌트인 wpr.exe를 사용하여 하드웨어 카운터를 수집합니다.
+ * 카운터별 멀티패스 방식: 8개 카운터를 하나씩 프로파일링 소스로 설정하여 순차 수집.
+ */
+
 const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { parseEtlDetailed, extractTidPidMap } = require('./etlParser');
 
+// 수집 대상 PMC 카운터 (8개)
 const COUNTER_NAMES = [
-  // MVP (5)
-  'InstructionRetired',
-  'TotalCycles',
-  'LLCMisses',
-  'BranchMispredictions',
-  'BranchInstructions',
-  // v1.1 (3) — ETW에서 추가로 사용 가능한 카운터
-  'LLCReference',            // LLC 접근 횟수 → Hit Rate 유도
-  'TotalIssues',             // uops dispatched (uops retired 근사치)
-  'UnhaltedReferenceCycles', // 기준 사이클 → 실효 주파수 추정
+  'InstructionRetired',        // 실행 완료 명령어 수
+  'TotalCycles',               // CPU 클럭 사이클 수
+  'LLCMisses',                 // LLC 미스 횟수
+  'BranchMispredictions',      // 분기 예측 실패 횟수
+  'BranchInstructions',        // 전체 분기 명령어 수
+  'LLCReference',              // LLC 접근 횟수
+  'TotalIssues',               // uOps dispatched
+  'UnhaltedReferenceCycles',   // 기준 클럭 사이클
 ];
 
-const SAMPLING_INTERVAL = 65536;
+const SAMPLING_INTERVAL = 65536;   // PMC 샘플링 간격
 const WPR_EXE = 'C:\\Windows\\System32\\wpr.exe';
 
 /* ------------------------------------------------------------------ */
-/*  Public API                                                         */
+/*  공개 API                                                           */
 /* ------------------------------------------------------------------ */
 
+/** ETW PMC 프로파일링 가용성 확인 */
 async function checkAvailability() {
   if (!fs.existsSync(WPR_EXE)) {
     return { available: false, reason: 'wpr.exe를 찾을 수 없습니다.' };
@@ -42,14 +49,11 @@ async function checkAvailability() {
 }
 
 /**
- * Collect all 5 PMC counters via multi-pass approach.
+ * 8개 PMC 카운터 멀티패스 수집.
  *
- * @param {object} opts
- * @param {string} opts.mode  'pid' | 'system' | 'app'
- * @param {number} [opts.pid] Target PID (required for 'pid' and 'app' modes)
- * @param {number[]} [opts.pids] All PIDs to include (for 'app' mode, auto-resolved if omitted)
- * @param {number} durationSec
- * @param {function} onProgress
+ * @param {object} opts          { mode: 'pid'|'system'|'app', pid?, pids? }
+ * @param {number} durationSec   총 측정 시간 (패스당 = durationSec / 8)
+ * @param {function} onProgress  진행 상황 콜백
  */
 async function collect(opts, durationSec, onProgress = () => {}) {
   const mode = opts.mode || 'pid';
@@ -59,46 +63,40 @@ async function collect(opts, durationSec, onProgress = () => {}) {
   const startTime = Date.now();
 
   try {
-    // Build target TID set based on mode
-    let targetTids = null; // null = system-wide
+    // 모드별 대상 TID 세트 구성
+    let targetTids = null;     // null = 시스템 전체
     let targetPids = [];
     let modeLabel = '';
 
     if (mode === 'system') {
       modeLabel = '시스템 전체';
       onProgress('시스템 전체 측정 모드');
-      // targetTids stays null → parseEtlDetailed counts all samples
 
     } else if (mode === 'app') {
       const rootPid = opts.pid;
       targetPids = opts.pids || getProcessTree(rootPid);
       modeLabel = `앱 (${targetPids.length}개 프로세스)`;
-      onProgress(`앱 측정: PID ${rootPid} + 자식 프로세스 ${targetPids.length}개`);
+      onProgress(`앱 측정: PID ${rootPid} + 자식 ${targetPids.length}개`);
 
       targetTids = new Set();
       for (const p of targetPids) {
         for (const t of getThreadIds(p)) targetTids.add(t);
       }
       onProgress(`총 ${targetTids.size}개 스레드`);
-
-      if (targetTids.size === 0) {
-        throw new Error('대상 프로세스 트리의 스레드를 찾을 수 없습니다.');
-      }
+      if (targetTids.size === 0) throw new Error('프로세스 트리의 스레드를 찾을 수 없습니다.');
 
     } else {
       // mode === 'pid'
       const pid = opts.pid;
       targetPids = [pid];
       modeLabel = `PID ${pid}`;
-      onProgress('대상 프로세스 스레드 ID 수집 중...');
+      onProgress('대상 프로세스 스레드 수집 중...');
       targetTids = getThreadIds(pid);
       onProgress(`PID ${pid}: ${targetTids.size}개 스레드`);
-
-      if (targetTids.size === 0) {
-        throw new Error(`PID ${pid}의 스레드를 찾을 수 없습니다.`);
-      }
+      if (targetTids.size === 0) throw new Error(`PID ${pid}의 스레드를 찾을 수 없습니다.`);
     }
 
+    // 카운터별 멀티패스 수집
     const counters = {};
     COUNTER_NAMES.forEach(n => { counters[n] = 0; });
     let totalPidSamples = 0;
@@ -111,14 +109,11 @@ async function collect(opts, durationSec, onProgress = () => {}) {
 
       onProgress(`[${i + 1}/${COUNTER_NAMES.length}] ${name} (${perPassSec}초)...`);
 
+      // .wprp 생성 → WPR 시작 → 대기 → WPR 중지
       writeSingleCounterWprp(wprpPath, name);
       await cancelSession();
       await runCmd(WPR_EXE, ['-start', `${wprpPath}!PMC`, '-filemode'], 30000);
-
-      for (let t = 0; t < perPassSec; t++) {
-        await sleep(1000);
-      }
-
+      for (let t = 0; t < perPassSec; t++) await sleep(1000);
       await runCmd(WPR_EXE, ['-stop', etlPath, '-skipPdbGen'], 120000);
 
       if (!fs.existsSync(etlPath)) {
@@ -126,7 +121,7 @@ async function collect(opts, durationSec, onProgress = () => {}) {
         continue;
       }
 
-      // For pid/app modes: refresh TIDs from ETL + live processes
+      // TID 새로고침 (ETL 내 매핑 + 라이브)
       let parseTids = targetTids;
       if (mode !== 'system' && targetTids) {
         const { tidToPid } = extractTidPidMap(etlPath);
@@ -134,20 +129,18 @@ async function collect(opts, durationSec, onProgress = () => {}) {
         for (const [tid, p] of tidToPid) {
           if (targetPids.includes(p)) parseTids.add(tid);
         }
-        // Refresh live TIDs
         for (const p of targetPids) {
           for (const t of getThreadIds(p)) parseTids.add(t);
         }
       }
 
+      // ETL 바이너리 파싱
       const result = parseEtlDetailed(etlPath, parseTids);
-
       counters[name] = result.pidSamples * SAMPLING_INTERVAL;
       totalPidSamples += result.pidSamples;
       totalSystemSamples += result.totalSamples;
 
       onProgress(`  ${name}: ${result.pidSamples} 샘플 (시스템: ${result.totalSamples})`);
-
       try { fs.unlinkSync(etlPath); } catch (_) {}
     }
 
@@ -155,8 +148,7 @@ async function collect(opts, durationSec, onProgress = () => {}) {
     onProgress(`수집 완료! (${elapsedSec}초 소요)`);
 
     return {
-      mode,
-      modeLabel,
+      mode, modeLabel,
       pid: opts.pid || null,
       pids: targetPids,
       sampleCount: totalPidSamples,
@@ -173,9 +165,11 @@ async function collect(opts, durationSec, onProgress = () => {}) {
   }
 }
 
-/**
- * Get all PIDs in a process tree (the root PID + all descendants).
- */
+/* ------------------------------------------------------------------ */
+/*  내부 함수                                                          */
+/* ------------------------------------------------------------------ */
+
+/** 프로세스 트리 조회 (부모 PID + 모든 자식 재귀) */
 function getProcessTree(rootPid) {
   try {
     const out = execSync(
@@ -193,6 +187,7 @@ function getProcessTree(rootPid) {
   }
 }
 
+/** 단일 카운터용 .wprp 프로파일 생성 */
 function writeSingleCounterWprp(filePath, counterName) {
   fs.writeFileSync(filePath, `<?xml version="1.0" encoding="utf-8"?>
 <WindowsPerformanceRecorder Version="1.0">
@@ -225,6 +220,7 @@ function writeSingleCounterWprp(filePath, counterName) {
 </WindowsPerformanceRecorder>`, 'utf8');
 }
 
+/** 프로세스의 스레드 ID 목록 조회 */
 function getThreadIds(pid) {
   const tids = new Set();
   try {
@@ -240,15 +236,17 @@ function getThreadIds(pid) {
   return tids;
 }
 
+/** 기존 WPR 세션 취소 */
 async function cancelSession() {
   try { await runCmd(WPR_EXE, ['-cancel'], 10000); } catch (_) {}
 }
 
+/** 외부 명령 실행 (Promise) */
 function runCmd(exe, args, timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
     let stdout = '', stderr = '';
     const proc = spawn(exe, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    const timer = setTimeout(() => { proc.kill(); reject(new Error(`시간 초과`)); }, timeoutMs);
+    const timer = setTimeout(() => { proc.kill(); reject(new Error('시간 초과')); }, timeoutMs);
     proc.stdout.on('data', d => { stdout += d.toString(); });
     proc.stderr.on('data', d => { stderr += d.toString(); });
     proc.on('error', err => { clearTimeout(timer); reject(err); });
@@ -260,6 +258,7 @@ function runCmd(exe, args, timeoutMs = 60000) {
   });
 }
 
+/** WPR 오류 메시지 한글 번역 */
 function translateError(msg, code) {
   const l = msg.toLowerCase();
   if (l.includes('0xc5585011') || l.includes('policy') || (l.includes('access') && l.includes('denied')))
@@ -270,10 +269,6 @@ function translateError(msg, code) {
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-function round(val, decimals) {
-  const f = Math.pow(10, decimals);
-  return Math.round(val * f) / f;
-}
+function round(v, d) { const f = Math.pow(10, d); return Math.round(v * f) / f; }
 
 module.exports = { checkAvailability, collect, COUNTER_NAMES, SAMPLING_INTERVAL };
