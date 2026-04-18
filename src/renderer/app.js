@@ -340,13 +340,29 @@ async function refreshUsage() {
     const gpu3d = d.gpu.utilization.total3d;
     setBar('gpu', gpu3d, `${gpu3d}%`);
 
-    // VRAM
-    const vramUsed = d.gpu.memory.dedicatedBytes + d.gpu.memory.sharedBytes;
-    const vramTotal = d.totalVramBytes > 0 ? d.totalVramBytes : vramUsed;
-    const vramPercent = vramTotal > 0 ? Math.min(100, (vramUsed / vramTotal) * 100) : 0;
-    setBar('vram', vramPercent, `${fmtBytes(vramUsed)} / ${fmtBytes(vramTotal)} (${vramPercent.toFixed(0)}%)`);
+    // VRAM — Dedicated와 Shared 분리 표시
+    const dedUsed = d.gpu.memory.dedicatedBytes;
+    const dedTotal = d.totalVramBytes;
+    const sharedUsed = d.gpu.memory.sharedBytes;
+    const totalUsed = dedUsed + sharedUsed;
 
-    // Detail text
+    // 바 비율: GPU 총 메모리 사용량 / 시스템 RAM 총량
+    const ramTotal = d.ram.totalBytes || 1;
+    const gpuMemPercent = Math.min(100, (totalUsed / ramTotal) * 100);
+
+    let vramText = '';
+    if (dedUsed > 0 && sharedUsed > 0) {
+      vramText = `Ded ${fmtBytes(dedUsed)} + Shared ${fmtBytes(sharedUsed)}`;
+    } else if (dedUsed > 0) {
+      vramText = `Ded ${fmtBytes(dedUsed)} / ${fmtBytes(dedTotal)}`;
+    } else if (sharedUsed > 0) {
+      vramText = `Shared ${fmtBytes(sharedUsed)}`;
+    } else {
+      vramText = '0 B';
+    }
+    setBar('vram', gpuMemPercent, vramText);
+
+    // 상세 텍스트
     const detail = document.getElementById('usage-detail');
     const parts = [
       `CPU ${d.cpu.logicalCores} cores`,
@@ -401,9 +417,10 @@ function renderGpuMetrics(gpu, targetPid) {
     gpuTbody.appendChild(tr);
   }
 
-  // 어댑터 정보
+  // 어댑터 정보 (가상 모니터 제외)
   if (gpu.adapters && gpu.adapters.length > 0) {
     gpuAdaptersInfo.textContent = gpu.adapters
+      .filter(a => !/virtual|mirror/i.test(a.name))
       .map(a => `${a.name} (${a.vramMB > 0 ? a.vramMB + ' MB' : 'Shared'}, driver ${a.driver})`)
       .join(' / ');
   }

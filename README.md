@@ -77,6 +77,8 @@ Windows Performance Counter(`Get-Counter`)로 수집. 관리자 권한 불필요
 | **VRAM Shared** | 시스템 RAM에서 GPU가 빌려 쓰는 메모리 | 어댑터 단위 |
 
 > **Dedicated vs Shared**: Dedicated는 GPU에 물리적으로 탑재된 VRAM(가장 빠름). Shared는 시스템 RAM을 GPU가 공유(내장 GPU는 이것만 사용). 작업 관리자 "GPU 메모리"와 동일한 값.
+>
+> 가상 디스플레이 드라이버(Meta Virtual Monitor 등)는 자동으로 필터링되어 VRAM 합산 및 어댑터 목록에서 제외됩니다.
 
 ### ETW 미지원 카운터
 
@@ -98,9 +100,19 @@ Windows Performance Counter(`Get-Counter`)로 수집. 관리자 권한 불필요
 | **CPU** | `os.cpus()` 1초 간격 비교 | 전체 CPU 사용률 |
 | **RAM** | `os.totalmem()` / `os.freemem()` | 물리 메모리 사용률 |
 | **GPU** | `GPU Engine\Utilization Percentage` | GPU 3D 엔진 사용률 |
-| **VRAM** | `GPU Adapter Memory` | Dedicated + Shared 총 사용량 |
+| **VRAM** | `GPU Adapter Memory` | GPU 메모리 사용량 (아래 참고) |
 
 70% 이상 노란색, 90% 이상 빨간색.
+
+**VRAM 바 표시 로직:**
+
+| 상황 | 표시 예시 | 설명 |
+|------|-----------|------|
+| Dedicated만 사용 | `Ded 500 MB / 2 GiB` | 외장 GPU 활성 시 |
+| Shared만 사용 | `Shared 4.42 GiB` | 내장 GPU만 사용 시 (Dedicated VRAM 없음) |
+| 둘 다 사용 | `Ded 500 MB + Shared 2 GiB` | 외장+내장 혼합 사용 시 |
+
+바 비율 = GPU 총 메모리 사용량(Ded+Shared) / 시스템 RAM 총량. 가상 모니터(Virtual/Mirror)는 자동 제외.
 
 ## 동작 방식
 

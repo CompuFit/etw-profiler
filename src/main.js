@@ -136,7 +136,9 @@ ipcMain.handle('get-usage', async () => {
       Promise.resolve(gpuService.snapshot(null)),
     ]);
     const adapters = gpuService.getAdapters();
-    const totalVram = adapters.reduce((sum, a) => sum + a.vramBytes, 0);
+    // 가상 모니터 제외하고 실제 GPU만 VRAM 합산
+    const realAdapters = adapters.filter(a => !/virtual|mirror/i.test(a.name));
+    const totalVram = realAdapters.reduce((sum, a) => sum + a.vramBytes, 0);
     return { ok: true, data: { ...usage, gpu: gpuSnap, totalVramBytes: totalVram } };
   } catch (e) {
     return { ok: false, error: e.message };
