@@ -169,6 +169,61 @@ body:has(.banner:not([style*="display: none"])) .layout {
   font-style: italic;
 }
 
+/* --- System Usage Bars --- */
+.usage-bar-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.usage-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.usage-label {
+  font-size: 11px;
+  color: #888;
+  font-weight: 600;
+}
+.usage-bar {
+  height: 18px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.usage-fill {
+  height: 100%;
+  background: #0e639c;
+  transition: width 0.3s ease;
+  width: 0%;
+}
+.usage-fill.high { background: #f48771; }
+.usage-fill.mid  { background: #dcdcaa; }
+.usage-value {
+  font-size: 12px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  color: #e6e6e6;
+  text-align: center;
+}
+.usage-detail {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 6px;
+  min-height: 14px;
+}
+.btn-small {
+  padding: 3px 10px;
+  background: #333;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #ccc;
+  font-size: 11px;
+  cursor: pointer;
+}
+.btn-small:hover { background: #444; }
+
 /* --- Selected Process Info --- */
 .selected-info {
   font-size: 13px;
@@ -260,6 +315,13 @@ body:has(.banner:not([style*="display: none"])) .layout {
   color: #666;
   font-size: 11px;
   font-style: italic;
+}
+
+/* --- GPU Adapters Info --- */
+.gpu-adapters-info {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #666;
 }
 
 /* --- Estimate Badge --- */
