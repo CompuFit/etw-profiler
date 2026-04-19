@@ -5,10 +5,29 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node scripts/test-etw-parser.js"
+    "test": "node scripts/test-etw-parser.js",
+    "build": "electron-builder --win",
+    "build:dir": "electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.compufit.etw-profiler",
+    "productName": "ETW PMC Profiler",
+    "win": {
+      "target": "nsis",
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ]
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.7.7",
+    "electron-builder": "^26.8.1"
   },
   "dependencies": {
     "ps-list": "7.2.0"
