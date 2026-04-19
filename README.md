@@ -6,12 +6,24 @@ Windows 빌트인 도구만으로 CPU Raw 카운터 + GPU Raw 카운터를 **한
 
 ## 사용법
 
+### 개발/테스트
+
 ```bash
-npm install                # 최초 1회
-start-as-admin.bat         # 관리자 권한으로 Electron 앱 실행
+npm install                # 최초 1회 의존성 설치
+npm start                  # 앱 실행 (UAC 팝업 자동 표시 → "예" 클릭)
+npm test                   # 유닛 테스트 (19개)
 ```
 
-> CPU PMC 측정에는 **관리자 권한** 필수. GPU 측정은 관리자 권한 불필요.
+`npm start` 실행 시 관리자 권한이 없으면 **UAC 팝업이 자동으로** 뜹니다. "예"를 클릭하면 관리자 권한으로 앱이 재실행됩니다.
+
+### 배포용 빌드 (.exe)
+
+```bash
+npm run build              # dist/ 에 설치 파일 생성
+npm run build:dir          # 설치 없이 폴더째 빌드 (테스트용)
+```
+
+빌드된 `.exe`는 Windows 매니페스트에 `requireAdministrator`가 설정되어 있어 실행 시 자동으로 UAC가 뜹니다. 사용자는 **프로그램 실행 → "예" 클릭** 한 번이면 바로 사용 가능.
 
 ## 측정 흐름
 
@@ -114,6 +126,18 @@ Windows Performance Counter(`Get-Counter`)로 수집. 관리자 권한 불필요
 
 바 비율 = GPU 총 메모리 사용량(Ded+Shared) / 시스템 RAM 총량. 가상 모니터(Virtual/Mirror)는 자동 제외.
 
+## 관리자 권한 자동 요청
+
+앱 실행 시 관리자 권한이 없으면 **UAC 팝업을 자동으로 띄워서** 권한을 요청합니다.
+
+| 상황 | 동작 |
+|------|------|
+| `npm start` (일반) | 관리자 아님 감지 → UAC 팝업 → "예" → 관리자로 재실행 |
+| `npm start` (이미 관리자) | UAC 없이 바로 실행 |
+| 빌드된 `.exe` | Windows 매니페스트로 자동 UAC |
+
+내부 동작: `net session` 명령으로 관리자 여부 확인 → 아니면 임시 PS1 스크립트 생성 → `Start-Process -Verb RunAs`로 자신을 관리자로 재실행 → 원래 프로세스 종료.
+
 ## 동작 방식
 
 "측정 시작" 버튼을 누르면:
@@ -128,10 +152,10 @@ PID 필터링: CPU는 ETL 내 TID->PID 매핑으로 귀속, GPU는 카운터 인
 
 ```
 src/
-  main.js                    Electron 메인 프로세스 + IPC 핸들러
+  main.js                    Electron 메인 + 관리자 자동 요청 + IPC 핸들러
   preload.js                 IPC 브릿지 (context isolation)
   services/
-    etwCollector.js          wpr.exe 세션 관리 + 멀티패스 수집 오케스트레이션
+    etwCollector.js          wpr.exe 세션 관리 + 멀티패스 수집
     etlParser.js             ETL 바이너리 직접 파싱 (PERFINFO_TRACE_HEADER)
     pmcService.js            CPU 측정 통합 서비스 (Raw 수집 + 유도 지표 계산)
     gpuService.js            GPU Raw 카운터 수집 (Windows Performance Counter)
@@ -145,15 +169,23 @@ scripts/
   test-etw-parser.js         유닛 테스트 (19개)
   test-gpu.js                GPU 스냅샷 테스트
   test-etw-collection.js     PMC 통합 테스트 (관리자 필요)
-start-as-admin.bat           관리자 권한 실행 스크립트
-package.json                 main: "src/main.js"
+package.json                 main: "src/main.js", 빌드 설정 포함
 ```
+
+## 빌드
+
+```bash
+npm run build              # dist/ 에 NSIS 설치 파일 (.exe) 생성
+npm run build:dir          # dist/win-unpacked/ 에 포터블 빌드
+```
+
+빌드 결과물의 `.exe`에는 `requestedExecutionLevel: requireAdministrator` 매니페스트가 설정되어 있어 실행만 하면 자동으로 UAC가 뜹니다.
 
 ## 제한사항
 
 | 제한 | 설명 |
 |------|------|
-| **관리자 권한 (CPU만)** | PMC 접근은 Windows에서 항상 admin 필요. GPU는 불필요 |
+| **관리자 권한 필수** | PMC 접근은 Windows에서 항상 admin 필요. 자동 UAC 요청 |
 | **시스템 전체 수집** | ETW PMC는 system-wide 수집 후 PID 필터링 방식 |
 | **배경 프로파일링 노이즈** | Windows 시스템 프로파일링이 동시 실행되어 절대값에 노이즈 포함 |
 | **Hyper-V / VBS** | 가상화 환경에서 PMU 접근 불가능할 수 있음 |
@@ -164,7 +196,7 @@ package.json                 main: "src/main.js"
 ## 테스트
 
 ```bash
-node scripts/test-etw-parser.js        # 유닛 테스트 (18개)
+npm test                               # 유닛 테스트 (19개)
 node scripts/test-gpu.js               # GPU 스냅샷 테스트
 node scripts/test-etw-collection.js    # PMC 통합 테스트 (관리자 필요)
 ```
